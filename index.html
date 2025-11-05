@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>build.meme - Build utility for your memecoin</title>
+    
+    <script src="https://cdn.ethers.io/lib/ethers-5.7.umd.min.js" type="application/javascript"></script>
+    
+    <style>
+        :root {
+            --color-background: #111111;
+            --color-text: #E0E0E0;
+            --color-primary: #00FF00; /* four.meme green */
+            --color-border: #333333;
+            --font-mono: 'Courier New', Courier, monospace;
+        }
+        
+        body {
+            font-family: var(--font-mono);
+            background-color: var(--color-background);
+            color: var(--color-text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            text-align: center;
+        }
+
+        .logo {
+            font-size: 3rem;
+            font-weight: bold;
+            color: var(--color-primary);
+            margin-bottom: 20px;
+            text-shadow: 0 0 10px var(--color-primary);
+        }
+
+        h1 {
+            font-size: 1.5rem;
+            margin-bottom: 10px;
+        }
+
+        p.subtitle {
+            font-size: 1rem;
+            color: #888;
+            margin-bottom: 40px;
+        }
+
+        .input-box {
+            background-color: #1A1A1A;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .token-input {
+            width: 100%;
+            background-color: var(--color-background);
+            border: 1px solid var(--color-border);
+            border-radius: 4px;
+            padding: 15px;
+            font-family: var(--font-mono);
+            color: var(--color-text);
+            font-size: 1rem;
+            box-sizing: border-box;
+            margin-bottom: 20px;
+        }
+
+        .token-input::placeholder {
+            color: #555;
+        }
+
+        .btn-proceed {
+            width: 100%;
+            background-color: var(--color-primary);
+            color: var(--color-background);
+            border: none;
+            padding: 15px;
+            font-family: var(--font-mono);
+            font-size: 1.2rem;
+            font-weight: bold;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-proceed:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+        }
+
+        .btn-proceed:hover:not(:disabled) {
+            background-color: #fff;
+            color: #000;
+            box-shadow: 0 0 15px var(--color-primary);
+        }
+
+        .footer-warning {
+            margin-top: 40px;
+            font-size: 0.9rem;
+            color: #FFA500; /* Orange for warning */
+            border: 1px solid #FFA500;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .footer-warning a {
+            color: var(--color-primary);
+            text-decoration: underline;
+        }
+        
+        /* This is our results/status box */
+        .results {
+            display: none; /* Starts hidden */
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #1A1A1A;
+            border: 1px solid var(--color-primary);
+            border-radius: 8px;
+            word-wrap: break-word;
+        }
+        .results p { margin: 0; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        
+        <div class="logo">build.meme</div>
+        
+        <h1>Your four.meme token is dying?</h1>
+        <p class="subtitle">Build utility. Give it a purpose. In 60 seconds.</p>
+
+        <div class="input-box">
+            <input type="text" id="token-input" class="token-input" placeholder="Paste your BNB Chain token address: 0x...">
+            <button id="btn-proceed" class="btn-proceed">BUILD IT!</button>
+        </div>
+
+        <div id="results-box" class="results">
+            <p id="results-text"></p>
+        </div>
+
+        <div class="footer-warning">
+            <strong>BETA WARNING:</strong> This is an MVP. 
+            The contract templates are <strong>NOT AUDITED</strong>. 
+            Use at your own risk. <a href="[YOUR_GITHUB_LINK_HERE]" target="_blank">See the code on GitHub</a>.
+        </div>
+
+    </div>
+
+    <script>
+        
+        // --- START OF CONFIGURATION (YOUR JOB, CEO) ---
+
+        // TODO 1: PASTE YOUR TREASURY WALLET ADDRESS
+        // This is the wallet from Step 1 that will receive the fees.
+        const FEE_WALLET = "0x63a456c812459c16f6f853ae7a8931284ac63856"; 
+        
+        // We will define our fee as 0.05 BNB.
+        // This value is in Wei (BNB's "cents"). 0.05 BNB = 50000000000000000 Wei
+        const FEE_AMOUNT_WEI = "50000000000000000"; 
+        
+        // This is the BNB Chain Testnet. We use this for testing.
+        const TESTNET_CHAIN_ID = "0x61"; // 97 in decimal
+        // This is the BNB Chain Mainnet (the real one).
+        const MAINNET_CHAIN_ID = "0x38"; // 56 in decimal
+
+        // TODO 2: PASTE YOUR ABI
+        // This is the "instruction manual" you saved in ABI.txt
+        // It must be pasted inside the brackets [ ... ]
+        const STAKING_CONTRACT_ABI = [
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "_stakeToken",
+				"type": "address"
+			}
+		],
+		"stateMutability": "nonpayable",
+		"type": "constructor"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "user",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "reward",
+				"type": "uint256"
+			}
+		],
+		"name": "RewardPaid",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "duration",
+				"type": "uint256"
+			}
+		],
+		"name": "RewardsFunded",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "user",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "Staked",
+		"type": "event"
+	},
+	{
+		"anonymous": false,
+		"inputs": [
+			{
+				"indexed": true,
+				"internalType": "address",
+				"name": "user",
+				"type": "address"
+			},
+			{
+				"indexed": false,
+				"internalType": "uint256",
+				"name": "amount",
+				"type": "uint256"
+			}
+		],
+		"name": "Withdrawn",
+		"type": "event"
+	},
+	{
+		"inputs": [],
+		"name": "claimRewards",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "_account",
+				"type": "address"
+			}
+		],
+		"name": "earned",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "_amount",
+				"type": "uint256"
+			},
+			{
+				"internalType": "uint256",
+				"name": "_duration",
+				"type": "uint256"
+			}
+		],
+		"name": "fundRewardPool",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "lastUpdateTime",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "owner",
+		"outputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "periodFinish",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"name": "rewardDebt",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "rewardPerTokenStored",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "rewardRate",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "_amount",
+				"type": "uint256"
+			}
+		],
+		"name": "stake",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "stakeToken",
+		"outputs": [
+			{
+				"internalType": "contract IERC20",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "address",
+				"name": "",
+				"type": "address"
+			}
+		],
+		"name": "stakedBalance",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [],
+		"name": "totalStaked",
+		"outputs": [
+			{
+				"internalType": "uint256",
+				"name": "",
+				"type": "uint256"
+			}
+		],
+		"stateMutability": "view",
+		"type": "function"
+	},
+	{
+		"inputs": [
+			{
+				"internalType": "uint256",
+				"name": "_amount",
+				"type": "uint256"
+			}
+		],
+		"name": "withdraw",
+		"outputs": [],
+		"stateMutability": "nonpayable",
+		"type": "function"
+	}
+]
+
+
+        // TODO 3: PASTE YOUR BYTECODE
+        // This is the "mold" you saved in BYTECODE.txt
+        // It must be pasted inside the quotes " ... "
+        const STAKING_CONTRACT_BYTECODE = "60a060405234801562000010575f80fd5b50604051620014c5380380620014c5833981810160405281019062000036919062000115565b335f806101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff1602179055508073ffffffffffffffffffffffffffffffffffffffff1660808173ffffffffffffffffffffffffffffffffffffffff16815250505062000145565b5f80fd5b5f73ffffffffffffffffffffffffffffffffffffffff82169050919050565b5f620000df82620000b4565b9050919050565b620000f181620000d3565b8114620000fc575f80fd5b50565b5f815190506200010f81620000e6565b92915050565b5f602082840312156200012d576200012c620000b0565b5b5f6200013c84828501620000ff565b91505092915050565b60805161134b6200017a5f395f818161047901528181610673015281816107a9015281816108dc0152610b46015261134b5ff3fe608060405234801561000f575f80fd5b50600436106100e6575f3560e01c80637b0a47ee1161008a578063a694fc3a11610064578063a694fc3a14610234578063c8f33c9114610250578063df136d651461026e578063ebe2b12b1461028c576100e6565b80637b0a47ee146101da578063817b1cd2146101f85780638da5cb5b14610216576100e6565b8063372500ab116100c6578063372500ab1461015257806351ed6a301461015c5780635873eb9b1461017a57806360217267146101aa576100e6565b80628cc262146100ea578062c9276f1461011a5780632e1a7d4d14610136575b5f80fd5b61010460048036038101906100ff9190610cd0565b6102aa565b6040516101119190610d13565b60405180910390f35b610134600480360381019061012f9190610d56565b61035d565b005b610150600480360381019061014b9190610d94565b6105bb565b005b61015a61079c565b005b6101646107a7565b6040516101719190610e1a565b60405180910390f35b610194600480360381019061018f9190610cd0565b6107cb565b6040516101a19190610d13565b60405180910390f35b6101c460048036038101906101bf9190610cd0565b6107e0565b6040516101d19190610d13565b60405180910390f35b6101e26107f5565b6040516101ef9190610d13565b60405180910390f35b6102006107fb565b60405161020d9190610d13565b60405180910390f35b61021e610801565b60405161022b9190610e42565b60405180910390f35b61024e60048036038101906102499190610d94565b610824565b005b610258610a07565b6040516102659190610d13565b60405180910390f35b610276610a0d565b6040516102839190610d13565b60405180910390f35b610294610a13565b6040516102a19190610d13565b60405180910390f35b5f670de0b6b3a764000060025f8473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020015f20546102fa610a19565b6103049190610e88565b60015f8573ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020015f205461034c9190610ebb565b6103569190610f29565b9050919050565b5f8054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff16146103ea576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004016103e190610fd9565b60405180910390fd5b5f811161042c576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040161042390611041565b60405180910390fd5b5f821161046e576040517f08c379a0000000000000000000000000000000000000000000000000000000008152600401610465906110a9565b60405180910390fd5b6104775f610a92565b7f000000000000000000000000000000000000000000000000000000000000000073ffffffffffffffffffffffffffffffffffffffff166323b872dd3330856040518463ffffffff1660e01b81526004016104d4939291906110c7565b6020604051808303815f875af11580156104f0573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906105149190611131565b610553576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040161054a906111a6565b60405180910390fd5b808261055f9190610f29565b600481905550804261057191906111c4565b600781905550426005819055507f2dd743ff6dc3e58c7665f23ce0cd8508028f1da1cf36d0ef53eb6576f1d0dfad82826040516105af9291906111f7565b60405180910390a15050565b5f81116105fd576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004016105f490611268565b60405180910390fd5b61060633610a92565b8060035f8282546106179190610e88565b925050819055508060015f3373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020015f205f82825461066a9190610e88565b925050819055507f000000000000000000000000000000000000000000000000000000000000000073ffffffffffffffffffffffffffffffffffffffff1663a9059cbb33836040518363ffffffff1660e01b81526004016106cc929190611286565b6020604051808303815f875af11580156106e8573d5f803e3d5ffd5b505050506040513d601f19601f8201168201806040525081019061070c9190611131565b61074b576040517f08c379a0000000000000000000000000000000000000000000000000000000008152600401610742906111a6565b60405180910390fd5b3373ffffffffffffffffffffffffffffffffffffffff167f7084f5476618d8e60b11ef0d7d3f06914655adb8793e28ff7f018d4c76d505d5826040516107919190610d13565b60405180910390a250565b6107a533610a92565b565b7f000000000000000000000000000000000000000000000000000000000000000081565b6002602052805f5260405f205f915090505481565b6001602052805f5260405f205f915090505481565b60045481565b60035481565b5f8054906101000a900473ffffffffffffffffffffffffffffffffffffffff1681565b5f8111610866576040517f08c379a000000000000000000000000000000000000000000000000000000000815260040161085d90611268565b60405180910390fd5b61086f33610a92565b8060035f82825461088091906111c4565b925050819055508060015f3373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020015f205f8282546108d391906111c4565b925050819055507f000000000000000000000000000000000000000000000000000000000000000073ffffffffffffffffffffffffffffffffffffffff166323b872dd3330846040518463ffffffff1660e01b8152600401610937939291906110c7565b6020604051808303815f875af1158015610953573d5f803e3d5ffd5b505050506040513d601f19601f820116820180604052508101906109779190611131565b6109b6576040517f08c379a00000000000000000000000000000000000000000000000000000000081526004016109ad906111a6565b60405180910390fd5b3373ffffffffffffffffffffffffffffffffffffffff167f9e71bc8eea02a63969f509818f2dafb9254532904319f9dbda79b67bd34a5f3d826040516109fc9190610d13565b60405180910390a250565b60055481565b60065481565b60075481565b5f8060035403610a2d576006549050610a8f565b5f6007544211610a3d5742610a41565b6007545b9050600354670de0b6b3a764000060055483610a5d9190610e88565b600454610a6a9190610ebb565b610a749190610ebb565b610a7e9190610f29565b600654610a8b91906111c4565b9150505b90565b610a9a610a19565b6006819055506007544211610aaf5742610ab3565b6007545b6005819055505f73ffffffffffffffffffffffffffffffffffffffff168173ffffffffffffffffffffffffffffffffffffffff1614610c6f575f610af6826102aa565b905060065460025f8473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020015f20819055505f811115610c6d577f000000000000000000000000000000000000000000000000000000000000000073ffffffffffffffffffffffffffffffffffffffff1663a9059cbb83836040518363ffffffff1660e01b8152600401610b9f929190611286565b6020604051808303815f875af1158015610bbb573d5f803e3d5ffd5b505050506040513d601f19601f82011682018060405250810190610bdf9190611131565b610c1e576040517f08c379a0000000000000000000000000000000000000000000000000000000008152600401610c15906112f7565b60405180910390fd5b8173ffffffffffffffffffffffffffffffffffffffff167fe2403640ba68fed3a2f88b7557551d1993f84b99bb10ff833f0cf8db0c5e048682604051610c649190610d13565b60405180910390a25b505b50565b5f80fd5b5f73ffffffffffffffffffffffffffffffffffffffff82169050919050565b5f610c9f82610c76565b9050919050565b610caf81610c95565b8114610cb9575f80fd5b50565b5f81359050610cca81610ca6565b92915050565b5f60208284031215610ce557610ce4610c72565b5b5f610cf284828501610cbc565b91505092915050565b5f819050919050565b610d0d81610cfb565b82525050565b5f602082019050610d265f830184610d04565b92915050565b610d3581610cfb565b8114610d3f575f80fd5b50565b5f81359050610d5081610d2c565b92915050565b5f8060408385031215610d6c57610d6b610c72565b5b5f610d7985828601610d42565b9250506020610d8a85828601610d42565b9150509250929050565b5f60208284031215610da957610da8610c72565b5b5f610db684828501610d42565b91505092915050565b5f819050919050565b5f610de2610ddd610dd884610c76565b610dbf565b610c76565b9050919050565b5f610df382610dc8565b9050919050565b5f610e0482610de9565b9050919050565b610e1481610dfa565b82525050565b5f602082019050610e2d5f830184610e0b565b92915050565b610e3c81610c95565b82525050565b5f602082019050610e555f830184610e33565b92915050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601160045260245ffd5b5f610e9282610cfb565b9150610e9d83610cfb565b9250828203905081811115610eb557610eb4610e5b565b5b92915050565b5f610ec582610cfb565b9150610ed083610cfb565b9250828202610ede81610cfb565b91508282048414831517610ef557610ef4610e5b565b5b5092915050565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52601260045260245ffd5b5f610f3382610cfb565b9150610f3e83610cfb565b925082610f4e57610f4d610efc565b5b828204905092915050565b5f82825260208201905092915050565b7f4f6e6c7920746865206f776e6572202874686520746f6b656e2063726561746f5f8201527f7229000000000000000000000000000000000000000000000000000000000000602082015250565b5f610fc3602283610f59565b9150610fce82610f69565b604082019050919050565b5f6020820190508181035f830152610ff081610fb7565b9050919050565b7f4475726174696f6e206d757374206265203e20300000000000000000000000005f82015250565b5f61102b601483610f59565b915061103682610ff7565b602082019050919050565b5f6020820190508181035f8301526110588161101f565b9050919050565b7f416d6f756e74206d757374206265203e203000000000000000000000000000005f82015250565b5f611093601283610f59565b915061109e8261105f565b602082019050919050565b5f6020820190508181035f8301526110c081611087565b9050919050565b5f6060820190506110da5f830186610e33565b6110e76020830185610e33565b6110f46040830184610d04565b949350505050565b5f8115159050919050565b611110816110fc565b811461111a575f80fd5b50565b5f8151905061112b81611107565b92915050565b5f6020828403121561114657611145610c72565b5b5f6111538482850161111d565b91505092915050565b7f5472616e73666572206661696c656400000000000000000000000000000000005f82015250565b5f611190600f83610f59565b915061119b8261115c565b602082019050919050565b5f6020820190508181035f8301526111bd81611184565b9050919050565b5f6111ce82610cfb565b91506111d983610cfb565b92508282019050808211156111f1576111f0610e5b565b5b92915050565b5f60408201905061120a5f830185610d04565b6112176020830184610d04565b9392505050565b7f416d6f756e74206d7573742062652067726561746572207468616e207a65726f5f82015250565b5f611252602083610f59565b915061125d8261121e565b602082019050919050565b5f6020820190508181035f83015261127f81611246565b9050919050565b5f6040820190506112995f830185610e33565b6112a66020830184610d04565b9392505050565b7f4661696c656420746f20706179207265776172640000000000000000000000005f82015250565b5f6112e1601483610f59565b91506112ec826112ad565b602082019050919050565b5f6020820190508181035f83015261130e816112d5565b905091905056fea26469706673582212201e7b0fd8c512129820fdb74973613d261dfe6075b2844a91cd6762ddd3907f9664736f6c63430008140033";
+
+        // --- END OF CONFIGURATION ---
+
+
+        // --- ENGINE LOGIC (MY JOB, DEVELOPER) ---
+
+        // References to our HTML elements
+        const deployButton = document.getElementById("btn-proceed");
+        const tokenInput = document.getElementById("token-input");
+        const resultsBox = document.getElementById("results-box");
+        const resultsText = document.getElementById("results-text");
+
+        let provider;
+        let signer;
+
+        // What happens when the "BUILD IT!" button is clicked
+        deployButton.addEventListener("click", async () => {
+            
+            deployButton.disabled = true; // Disable button to prevent double clicks
+            
+            try {
+                // 1. Connect to Wallet (MetaMask)
+                if (typeof window.ethereum === "undefined") {
+                    throw new Error("MetaMask is not installed. Please install it.");
+                }
+                
+                provider = new ethers.providers.Web3Provider(window.ethereum);
+                await provider.send("eth_requestAccounts", []); // Request connection
+                signer = provider.getSigner();
+                
+                // 2. Check for correct Network (BNB Testnet for now)
+                const { chainId } = await provider.getNetwork();
+                if (chainId.toString(16) !== TESTNET_CHAIN_ID.substring(2)) {
+                    // Uncomment the line below to ask user to switch to Mainnet
+                    // await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: MAINNET_CHAIN_ID }], });
+                    
+                    // For now, we only work on Testnet
+                    throw new Error("Please switch your MetaMask to BNB Testnet (ChainID 97).");
+                }
+
+                // 3. Validate the Token Address
+                const memecoinAddress = tokenInput.value;
+                if (!ethers.utils.isAddress(memecoinAddress)) {
+                    throw new Error("Invalid token address.");
+                }
+                
+                // 4. Charge the Platform Fee (Our first transaction)
+                showMessage("Processing platform fee (0.05 Testnet BNB)...");
+                
+                if (FEE_WALLET === "0x...[PASTE_YOUR_TREASURY_WALLET_ADDRESS_HERE]") {
+                    throw new Error("CEO Error: FEE_WALLET is not configured in index.html!");
+                }
+                
+                const feeTx = await signer.sendTransaction({
+                    to: FEE_WALLET,
+                    value: FEE_AMOUNT_WEI
+                });
+                await feeTx.wait(); // Wait for the fee transaction to be confirmed
+                
+                // 5. Deploy the Staking Contract (Our second transaction)
+                showMessage("Fee paid! Deploying your new Staking Contract...");
+                
+                if (STAKING_CONTRACT_BYTECODE === "0x...[PASTE_YOUR_BYTECODE_TEXT_HERE]") {
+                    throw new Error("CEO Error: BYTECODE is not configured in index.html!");
+                }
+                
+                // The "Factory" that builds our contract
+                const contractFactory = new ethers.ContractFactory(
+                    STAKING_CONTRACT_ABI,
+                    STAKING_CONTRACT_BYTECODE,
+                    signer
+                );
+                
+                // We deploy the factory, passing the memecoinAddress
+                // to the "constructor" of our Solidity contract
+                const contract = await contractFactory.deploy(memecoinAddress);
+                
+                // Wait for the contract to be officially published on the blockchain
+                await contract.deployed();
+                
+                // 6. Success!
+                showSuccess(`SUCCESS! Your new Staking Contract is live at: ${contract.address}`);
+
+            } catch (error) {
+                console.error(error);
+                showError(error.message); // Show a friendly error
+            }
+            
+            deployButton.disabled = false; // Re-enable the button
+        });
+
+        // Feedback functions for the user
+        function showMessage(message) {
+            resultsBox.style.display = "block";
+            resultsBox.style.borderColor = "#888";
+            resultsText.style.color = "#E0E0E0";
+            resultsText.innerText = `Status: ${message}`;
+        }
+
+        function showSuccess(message) {
+            resultsBox.style.display = "block";
+            resultsBox.style.borderColor = "var(--color-primary)";
+            resultsText.style.color = "var(--color-primary)";
+            resultsText.innerText = message;
+        }
+
+        function showError(message) {
+            resultsBox.style.display = "block";
+            resultsBox.style.borderColor = "#FF4136"; // Red
+            resultsText.style.color = "#FF4136";
+            resultsText.innerText = `Error: ${message}`;
+        }
+
+    </script>
+</body>
+</html>
